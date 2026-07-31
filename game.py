@@ -9,9 +9,31 @@ from PIL import Image
 pygame.init()
 pygame.font.init()
 
-ser = serial.Serial("/dev/tty.usbmodem1101", 115200)
+SERIAL_PORT = "/dev/tty.usbmodem1101"
 
+
+if sys.platform.startswith("darwin"):
+    # MacOS port
+    SERIAL_PORT = "/dev/tty.usbmodem1101"
+elif sys.platform.startswith("win"):
+    # Windows Port
+    SERIAL_PORT = "COM3"
+elif sys.platform.startswith("linux"):
+    # Linux Port
+    SERIAL_PORT = "/dev/ttyUSB0"
+
+ser = None
 direction = "NEUTRAL"
+port_available = True
+print(sys.platform, SERIAL_PORT)
+
+try:
+    ser = serial.Serial(SERIAL_PORT, 115200)
+    print("Port is available: Using handbot.")
+except (serial.SerialException, OSError):
+    port_available = False
+    print("Port is not available: Using keyboards.")
+
 
 WIDTH = 600
 HEIGHT = 500
@@ -98,23 +120,27 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT or event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             running = False
+    
+    if port_available:
+        # Using HandBot
+        if (ser.in_waiting > 0):
+            direction = ser.readline().decode().strip()
 
-    # keys = pygame.key.get_pressed()
-    # if keys[pygame.K_LEFT]:
-    #     if player.x - HAND_SPEED >= 0:
-    #         player.x -= HAND_SPEED
-    # elif keys[pygame.K_RIGHT]:
-    #     if player.x + HAND_SPEED <= WIDTH - HAND_WIDTH:
-    #         player.x += HAND_SPEED
-    if (ser.in_waiting > 0):
-        direction = ser.readline().decode().strip()
-
-    if direction == "MOVED_LEFT":
-        if player.x - HAND_SPEED >= 0:
-            player.x -= HAND_SPEED
-    elif direction == "MOVED_RIGHT":
-        if player.x + HAND_SPEED <= WIDTH - HAND_WIDTH:
-            player.x += HAND_SPEED
+        if direction == "MOVED_LEFT":
+            if player.x - HAND_SPEED >= 0:
+                player.x -= HAND_SPEED
+        elif direction == "MOVED_RIGHT":
+            if player.x + HAND_SPEED <= WIDTH - HAND_WIDTH:
+                player.x += HAND_SPEED
+    else:
+        # Using keyboard
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_LEFT]:
+            if player.x - HAND_SPEED >= 0:
+                player.x -= HAND_SPEED
+        elif keys[pygame.K_RIGHT]:
+            if player.x + HAND_SPEED <= WIDTH - HAND_WIDTH:
+                player.x += HAND_SPEED
     
     timer += 1
     if timer % 120 == 0:
