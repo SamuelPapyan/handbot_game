@@ -24,15 +24,16 @@ elif sys.platform.startswith("linux"):
 
 ser = None
 direction = "NEUTRAL"
-port_available = True
+port_available = False
 print(sys.platform, SERIAL_PORT)
 
-try:
-    ser = serial.Serial(SERIAL_PORT, 115200)
-    print("Port is available: Using handbot.")
-except (serial.SerialException, OSError):
-    port_available = False
-    print("Port is not available: Using keyboards.")
+# try:
+#     ser = serial.Serial(SERIAL_PORT, 115200)
+#     port_available = True
+#     print("Port is available: Using handbot.")
+# except (serial.SerialException, OSError):
+#     port_available = False
+#     print("Port is not available: Using keyboards.")
 
 
 WIDTH = 600
@@ -50,15 +51,17 @@ BROWN = (100,70,30)
 WHITE = (255,255,255)
 
 
-HAND_WIDTH = 120
-HAND_HEIGHT = 75
+SPEEDUP_WIDTH = 90
+SPEEDUP_HEIGHT = 64
 
 PLAYER_SIZE = 80
 
-COIN_SIZE = 75
+COIN_SIZE = 56
 
 PLAYER_SPEED = 4
 COIN_SPEED = 2
+SPEEDUP_SPEED = 3
+SPEEDUP_MAX_TIME = 600
 
 GROUND_SIZE = 64
 
@@ -96,6 +99,7 @@ def load_gif_frames(filename, width, height):
     return [pygame.transform.scale(frame, (width, height)) for frame in frames]
 
 coin_gif = load_gif_frames("coin_gif.gif", COIN_SIZE, COIN_SIZE)
+speedup_gif = load_gif_frames("sprites/speedup/speedup.gif", SPEEDUP_WIDTH, SPEEDUP_HEIGHT)
 
 player_gif = {
     "idle_left": load_gif_frames("sprites/player/idle_left.gif", PLAYER_SIZE, PLAYER_SIZE),
@@ -105,10 +109,14 @@ player_gif = {
 }
 bg_img = load_image("bg.png", WIDTH, HEIGHT)
 ground_img = load_image("ground.png", GROUND_SIZE, GROUND_SIZE)
+speedup_icon_img = load_image("speedup_icon.png", 32, 32)
 
 current_frame = 0
 player_current_frame = 0
+speedup_current_frame = 0
 player_current_state = "idle_left"
+
+speedup_timer = 0
 
 animation_speed = 100
 last_update = pygame.time.get_ticks()
@@ -121,7 +129,18 @@ player = pygame.Rect(
 )
 
 coins = []
+speedup = None
 timer = 0
+
+fps_per_coin = 120
+
+def show_speedup_timer_ui(s, time):
+    max_size = 180
+    max_bar_size = max_size - 4
+    pygame.draw.rect(s, "#ffffff", (WIDTH-(max_size + 20), 15, max_size, 20))
+    pygame.draw.rect(s, "#ff0000", (WIDTH-(max_bar_size * (time / SPEEDUP_MAX_TIME) + 20), 17, max_bar_size * (time / SPEEDUP_MAX_TIME), 16))
+    pygame.draw.circle(s, "#ffffff", (WIDTH -32, 25), 20)
+    s.blit(speedup_icon_img, (WIDTH-45, 10))
 
 while running:
     screen.blit(bg_img, (0,0))
@@ -160,10 +179,23 @@ while running:
             player_current_state = "idle_left"
     
     timer += 1
-    if timer % 120 == 0:
+    if timer % fps_per_coin == 0:
         x = random.randint(0, WIDTH - COIN_SIZE)
         coin = pygame.Rect(x, -COIN_SIZE, COIN_SIZE, COIN_SIZE)
         coins.append(coin)
+        COIN_SPEED + 0.1
+        if fps_per_coin > 60:
+            fps_per_coin -= 1
+    
+    if fps_per_coin < 75 and timer % (60 * 20) == 0:
+        x = random.randint(0, WIDTH - SPEEDUP_WIDTH)
+        speedup = pygame.Rect(x, -SPEEDUP_HEIGHT, SPEEDUP_WIDTH, SPEEDUP_HEIGHT)
+
+    if speedup_timer > 0:
+        speedup_timer -= 1
+        PLAYER_SPEED = 10
+    else:
+        PLAYER_SPEED = 4 
 
     for coin in coins:
         coin.y += COIN_SPEED
@@ -173,10 +205,20 @@ while running:
             score += 1
         elif coin.top > HEIGHT - COIN_SIZE - GROUND_SIZE:
             coins.remove(coin)
+    
+    if speedup != None:
+        speedup.y += SPEEDUP_SPEED
+        if player.colliderect(speedup):
+            speedup = None
+            speedup_timer = SPEEDUP_MAX_TIME
+        elif speedup.top > HEIGHT - SPEEDUP_HEIGHT - GROUND_SIZE:
+            speedup = None
 
     if now - last_update > animation_speed:
         current_frame = (current_frame + 1) % len(coin_gif)
         player_current_frame = (player_current_frame + 1) % 4
+        if speedup != None:
+            speedup_current_frame = (speedup_current_frame + 1) % len(speedup_gif)
         last_update = now
 
     screen.blit(player_gif[player_current_state][player_current_frame], player)
@@ -186,8 +228,13 @@ while running:
         screen.blit(ground_img, (i, HEIGHT - GROUND_SIZE))
     for coin in coins:
         screen.blit(coin_gif[current_frame], coin)
+    if speedup != None:
+        screen.blit(speedup_gif[speedup_current_frame], speedup)
     score_text = font.render("Score: " + str(score), True, (255,255,0))
     screen.blit(score_text, (50, 50))
+
+    if speedup_timer > 0:
+        show_speedup_timer_ui(screen, speedup_timer)
 
     pygame.display.flip()
     clock.tick(60)
