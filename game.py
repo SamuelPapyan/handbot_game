@@ -53,10 +53,14 @@ WHITE = (255,255,255)
 HAND_WIDTH = 120
 HAND_HEIGHT = 75
 
+PLAYER_SIZE = 80
+
 COIN_SIZE = 75
 
-HAND_SPEED = 4
+PLAYER_SPEED = 4
 COIN_SPEED = 2
+
+GROUND_SIZE = 64
 
 score = 0
 
@@ -80,7 +84,6 @@ def load_gif_frames(filename, width, height):
     try:
         while True:
             frame_rgba = img.convert("RGBA")
-            frame_size = img.resize((width, height))
             frame_bytes = frame_rgba.tobytes()
 
             pygame_surface = pygame.image.fromstring(
@@ -90,32 +93,38 @@ def load_gif_frames(filename, width, height):
             img.seek(img.tell() + 1)
     except EOFError:
         pass
-    return frames
+    return [pygame.transform.scale(frame, (width, height)) for frame in frames]
 
-hand_image = load_image("hand.png", HAND_WIDTH, HAND_HEIGHT)
-coin_image = load_image("coin_gif.gif", COIN_SIZE, COIN_SIZE)
-raw_frames = load_gif_frames("coin_gif.gif", COIN_SIZE, COIN_SIZE)
-coin_gif = [pygame.transform.scale(frame, (COIN_SIZE, COIN_SIZE)) for frame in raw_frames]
+coin_gif = load_gif_frames("coin_gif.gif", COIN_SIZE, COIN_SIZE)
+
+player_gif = {
+    "idle_left": load_gif_frames("sprites/player/idle_left.gif", PLAYER_SIZE, PLAYER_SIZE),
+    "idle_right": load_gif_frames("sprites/player/idle_right.gif", PLAYER_SIZE, PLAYER_SIZE),
+    "run_left": load_gif_frames("sprites/player/run_left.gif", PLAYER_SIZE, PLAYER_SIZE),
+    "run_right": load_gif_frames("sprites/player/run_right.gif", PLAYER_SIZE, PLAYER_SIZE),
+}
+bg_img = load_image("bg.png", WIDTH, HEIGHT)
+ground_img = load_image("ground.png", GROUND_SIZE, GROUND_SIZE)
 
 current_frame = 0
+player_current_frame = 0
+player_current_state = "idle_left"
+
 animation_speed = 100
 last_update = pygame.time.get_ticks()
 
-hand_image.set_colorkey(WHITE)
-coin_image.set_colorkey((252, 237, 187))
-
 player = pygame.Rect(
-    WIDTH // 2 - HAND_WIDTH // 2,
-    HEIGHT - HAND_HEIGHT - 10,
-    HAND_WIDTH,
-    HAND_HEIGHT
+    WIDTH // 2 - PLAYER_SIZE // 2,
+    HEIGHT - PLAYER_SIZE - GROUND_SIZE,
+    PLAYER_SIZE,
+    PLAYER_SIZE
 )
 
 coins = []
 timer = 0
 
 while running:
-    screen.fill(SKY_BLUE)
+    screen.blit(bg_img, (0,0))
     now = pygame.time.get_ticks()
     for event in pygame.event.get():
         if event.type == pygame.QUIT or event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
@@ -127,20 +136,28 @@ while running:
             direction = ser.readline().decode().strip()
 
         if direction == "MOVED_LEFT":
-            if player.x - HAND_SPEED >= 0:
-                player.x -= HAND_SPEED
+            player_current_state = "run_right"
+            if player.x - PLAYER_SPEED >= 0:
+                player.x -= PLAYER_SPEED
         elif direction == "MOVED_RIGHT":
-            if player.x + HAND_SPEED <= WIDTH - HAND_WIDTH:
-                player.x += HAND_SPEED
+            player_current_state = "run_left"
+            if player.x + PLAYER_SPEED <= WIDTH - PLAYER_SIZE:
+                player.x += PLAYER_SPEED
+        else:
+            player_current_state = "idle_left"
     else:
         # Using keyboard
         keys = pygame.key.get_pressed()
         if keys[pygame.K_LEFT]:
-            if player.x - HAND_SPEED >= 0:
-                player.x -= HAND_SPEED
+            player_current_state = "run_right"
+            if player.x - PLAYER_SPEED >= 0:
+                player.x -= PLAYER_SPEED
         elif keys[pygame.K_RIGHT]:
-            if player.x + HAND_SPEED <= WIDTH - HAND_WIDTH:
-                player.x += HAND_SPEED
+            player_current_state = "run_left"
+            if player.x + PLAYER_SPEED <= WIDTH - PLAYER_SIZE:
+                player.x += PLAYER_SPEED
+        else:
+            player_current_state = "idle_left"
     
     timer += 1
     if timer % 120 == 0:
@@ -154,16 +171,19 @@ while running:
         if player.colliderect(coin):
             coins.remove(coin)
             score += 1
-        elif coin.top > HEIGHT - COIN_SIZE - 10:
+        elif coin.top > HEIGHT - COIN_SIZE - GROUND_SIZE:
             coins.remove(coin)
 
     if now - last_update > animation_speed:
         current_frame = (current_frame + 1) % len(coin_gif)
+        player_current_frame = (player_current_frame + 1) % 4
         last_update = now
 
-    screen.blit(hand_image, player)
+    screen.blit(player_gif[player_current_state][player_current_frame], player)
 
     pygame.draw.rect(screen, BROWN, (0, HEIGHT-10, WIDTH, 10))
+    for i in range(0, WIDTH, GROUND_SIZE):
+        screen.blit(ground_img, (i, HEIGHT - GROUND_SIZE))
     for coin in coins:
         screen.blit(coin_gif[current_frame], coin)
     score_text = font.render("Score: " + str(score), True, (255,255,0))
