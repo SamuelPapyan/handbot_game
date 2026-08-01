@@ -14,7 +14,7 @@ SERIAL_PORT = "/dev/tty.usbmodem1101"
 
 if sys.platform.startswith("darwin"):
     # MacOS port
-    SERIAL_PORT = "/dev/tty.usbmodem1101"
+    SERIAL_PORT = "/dev/cu.usbmodem1101"
 elif sys.platform.startswith("win"):
     # Windows Port
     SERIAL_PORT = "COM3"
@@ -27,13 +27,13 @@ direction = "NEUTRAL"
 port_available = False
 print(sys.platform, SERIAL_PORT)
 
-# try:
-#     ser = serial.Serial(SERIAL_PORT, 115200)
-#     port_available = True
-#     print("Port is available: Using handbot.")
-# except (serial.SerialException, OSError):
-#     port_available = False
-#     print("Port is not available: Using keyboards.")
+try:
+    ser = serial.Serial(SERIAL_PORT, 115200)
+    port_available = True
+    print("Port is available: Using handbot.")
+except (serial.SerialException, OSError):
+    port_available = False
+    print("Port is not available: Using keyboards.")
 
 
 WIDTH = 600
@@ -60,13 +60,20 @@ COIN_SIZE = 56
 
 HEALTH_SIZE = 56
 
+FIRE_SIZE = 32
+
 PLAYER_SPEED = 4
 COIN_SPEED = 2
 SPEEDUP_SPEED = 3
 HEALTH_SPEED = 3
 BAT_SPEED = 5
+STAR_SPEED = 3
+FIRE_SPEED = 5
+
+STAR_SIZE = 60
 
 SPEEDUP_MAX_TIME = 600
+STAR_MAX_TIME = 1200
 
 GROUND_SIZE = 64
 
@@ -104,10 +111,19 @@ def load_gif_frames(filename, width, height):
         pass
     return [pygame.transform.scale(frame, (width, height)) for frame in frames]
 
+def show_game_over(s, score):
+    game_over_text = font.render("Game Over", True, (255, 0, 0))
+    score_text = font.render("Score: " + str(score), True, (255, 255, 0))
+    s.blit(game_over_text, (WIDTH // 2 - game_over_text.get_width() // 2, HEIGHT // 2 - game_over_text.get_height() // 2 - 30))
+    s.blit(score_text, (WIDTH // 2 - score_text.get_width() // 2, HEIGHT // 2 - score_text.get_height() // 2 + 30))
+    pygame.display.flip()
+    pygame.time.wait(3000)
+
 coin_gif = load_gif_frames("coin_gif.gif", COIN_SIZE, COIN_SIZE)
 speedup_gif = load_gif_frames("sprites/speedup/speedup.gif", SPEEDUP_WIDTH, SPEEDUP_HEIGHT)
 bat_gif = load_gif_frames("sprites/bat/bat.gif", BAT_WIDTH, BAT_HEIGHT)
-
+star_gif = load_gif_frames("sprites/star/star.gif", STAR_SIZE, STAR_SIZE)
+fire_gif = load_gif_frames("fire.gif", FIRE_SIZE, FIRE_SIZE)
 player_gif = {
     "idle_left": load_gif_frames("sprites/player/idle_left.gif", PLAYER_SIZE, PLAYER_SIZE),
     "idle_right": load_gif_frames("sprites/player/idle_right.gif", PLAYER_SIZE, PLAYER_SIZE),
@@ -119,14 +135,18 @@ ground_img = load_image("ground.png", GROUND_SIZE, GROUND_SIZE)
 speedup_icon_img = load_image("speedup_icon.png", 32, 32)
 hp_icon_img = load_image("hp.png", 26, 24)
 health_img = load_image("hp.png", HEALTH_SIZE, HEALTH_SIZE)
+star_icon_img = load_image("sprites/star/star.gif", 32, 32)
 
 current_frame = 0
 player_current_frame = 0
 speedup_current_frame = 0
+star_current_frame = 0
 bat_current_frame = 0
+fire_current_frame = 0
 player_current_state = "idle_left"
 
 speedup_timer = 0
+star_timer = 0
 
 animation_speed = 100
 last_update = pygame.time.get_ticks()
@@ -142,6 +162,8 @@ coins = []
 bats = []
 speedup = None
 health = None
+star = None
+fire = None
 timer = 0
 
 fps_per_coin = 120
@@ -153,6 +175,14 @@ def show_speedup_timer_ui(s, time):
     pygame.draw.rect(s, "#ff0000", (WIDTH-(max_bar_size * (time / SPEEDUP_MAX_TIME) + 20), 17, max_bar_size * (time / SPEEDUP_MAX_TIME), 16))
     pygame.draw.circle(s, "#ffffff", (WIDTH -32, 25), 20)
     s.blit(speedup_icon_img, (WIDTH-45, 10))
+
+def show_star_timer_ui(s, time):
+    max_size = 180
+    max_bar_size = max_size - 4
+    pygame.draw.rect(s, "#ffffff", (WIDTH-(max_size + 20), 60 + 15, max_size, 20))
+    pygame.draw.rect(s, "#ff0000", (WIDTH-(max_bar_size * (time / STAR_MAX_TIME) + 20), 60 + 17, max_bar_size * (time / STAR_MAX_TIME), 16))
+    pygame.draw.circle(s, "#ffffff", (WIDTH -32, 60 + 25), 20)
+    s.blit(star_icon_img, (WIDTH-45, 60 + 10))
 
 def show_health_bar(s, h):
     max_size = 144
@@ -175,16 +205,18 @@ while running:
         if (ser.in_waiting > 0):
             direction = ser.readline().decode().strip()
 
-        if direction == "MOVED_LEFT":
+        if direction in ["MOVED_LEFT", "MOVED_UP_LEFT"]:
             player_current_state = "run_right"
             if player.x - PLAYER_SPEED >= 0:
                 player.x -= PLAYER_SPEED
-        elif direction == "MOVED_RIGHT":
+        elif direction in ["MOVED_RIGHT", "MOVED_UP_RIGHT"]:
             player_current_state = "run_left"
             if player.x + PLAYER_SPEED <= WIDTH - PLAYER_SIZE:
                 player.x += PLAYER_SPEED
         else:
             player_current_state = "idle_left"
+        if direction in ["UP", "MOVED_UP_LEFT", "MOVED_UP_RIGHT"] and star_timer > 0 and fire == None:
+            fire = pygame.Rect(player.x + PLAYER_SIZE // 2 - FIRE_SIZE // 2, player.y - FIRE_SIZE, FIRE_SIZE, FIRE_SIZE)
     else:
         # Using keyboard
         keys = pygame.key.get_pressed()
@@ -198,6 +230,8 @@ while running:
                 player.x += PLAYER_SPEED
         else:
             player_current_state = "idle_left"
+        if keys[pygame.K_SPACE] and star_timer > 0 and fire == None:
+            fire = pygame.Rect(player.x + PLAYER_SIZE // 2 - FIRE_SIZE // 2, player.y - FIRE_SIZE, FIRE_SIZE, FIRE_SIZE)
     
     timer += 1
     if timer % fps_per_coin == 0:
@@ -208,24 +242,30 @@ while running:
         if fps_per_coin > 60:
             fps_per_coin -= 1
     
-    if fps_per_coin < 75 and timer % (60 * 20) == 0:
+    if  timer % (60 * 20) == 0:
         x = random.randint(0, WIDTH - SPEEDUP_WIDTH)
         speedup = pygame.Rect(x, -SPEEDUP_HEIGHT, SPEEDUP_WIDTH, SPEEDUP_HEIGHT)
     
-    if fps_per_coin < 65 and timer % (60 * 40) == 0:
+    if  timer % (60 * 40) == 0:
         x = random.randint(0, WIDTH - HEALTH_SIZE)
         health = pygame.Rect(x, -HEALTH_SIZE, HEALTH_SIZE, HEALTH_SIZE)
 
-    if fps_per_coin < 100 and timer % (60 * 10) == 0:
+    if timer % (60 * 3) == 0:
         x = random.randint(0, WIDTH - BAT_WIDTH)
         bat = pygame.Rect(x, -BAT_WIDTH, BAT_WIDTH, BAT_HEIGHT)
         bats.append(bat)
+    if timer % (60 * 10) == 0:
+        x = random.randint(0, WIDTH - STAR_SIZE)
+        star = pygame.Rect(x, -STAR_SIZE, STAR_SIZE, STAR_SIZE)
 
     if speedup_timer > 0:
         speedup_timer -= 1
         PLAYER_SPEED = 10
     else:
         PLAYER_SPEED = 4 
+
+    if star_timer > 0:
+        star_timer -= 1
 
     for coin in coins:
         coin.y += COIN_SPEED
@@ -242,8 +282,12 @@ while running:
         if player.colliderect(bat):
             bats.remove(bat)
             hp -= 1
-        elif bat.top > HEIGHT - BAT_HEIGHT - GROUND_SIZE:
+        elif fire != None and bat.colliderect(fire):
             bats.remove(bat)
+            fire = None
+            score += 5
+        elif bat.top > HEIGHT - BAT_HEIGHT - GROUND_SIZE:
+            bats.remove(bat)    
     
     if speedup != None:
         speedup.y += SPEEDUP_SPEED
@@ -252,7 +296,15 @@ while running:
             speedup_timer = SPEEDUP_MAX_TIME
         elif speedup.top > HEIGHT - SPEEDUP_HEIGHT - GROUND_SIZE:
             speedup = None
-    
+
+    if star != None:
+        star.y += STAR_SPEED
+        if player.colliderect(star):
+            star = None
+            star_timer = STAR_MAX_TIME
+        elif star.top > HEIGHT - STAR_SIZE - GROUND_SIZE:
+            star = None
+
     if health != None:
         health.y += HEALTH_SPEED
         if player.colliderect(health):
@@ -260,13 +312,22 @@ while running:
             hp += (2 if hp + 2 <= 10 else 10 - hp)
         elif health.top > HEIGHT - HEALTH_SIZE - GROUND_SIZE:
             health = None
+    
+    if fire != None:
+        fire.y -= FIRE_SPEED
+        if fire.top < 0:
+            fire = None
 
     if now - last_update > animation_speed:
         current_frame = (current_frame + 1) % len(coin_gif)
         player_current_frame = (player_current_frame + 1) % 4
         bat_current_frame = (bat_current_frame + 1) % len(bat_gif)
+        if star != None:
+            star_current_frame = (star_current_frame + 1) % len(star_gif)
         if speedup != None:
             speedup_current_frame = (speedup_current_frame + 1) % len(speedup_gif)
+        if fire != None:
+            fire_current_frame = (fire_current_frame + 1) % len(fire_gif)
         last_update = now
 
     screen.blit(player_gif[player_current_state][player_current_frame], player)
@@ -281,12 +342,24 @@ while running:
         screen.blit(speedup_gif[speedup_current_frame], speedup)
     if health != None:
         screen.blit(health_img, health)
+    if star != None:
+        screen.blit(star_gif[star_current_frame], star)
+    if fire != None:
+        screen.blit(fire_gif[fire_current_frame], fire)
     score_text = font.render("Score: " + str(score), True, (255,255,0))
     screen.blit(score_text, (50, 50))
 
     if speedup_timer > 0:
         show_speedup_timer_ui(screen, speedup_timer)
+    if star_timer > 0:
+        show_star_timer_ui(screen, star_timer)
+    if fire != None:
+        screen.blit(fire_gif[fire_current_frame], fire)
     show_health_bar(screen, hp)
+
+    if hp <= 0:
+        show_game_over(screen, score)
+        running = False
 
     pygame.display.flip()
     clock.tick(60)
